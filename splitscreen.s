@@ -65,6 +65,12 @@ SetPic1:
 .cont:
     MULU    #240,D2
     ADD.L   D2,D0
+    CMPI.B  #0,BPADDRADDER
+    BGE.S   .add:
+    SUB.L   #2,D0
+    BRA.S   .POINTBP
+.add:
+    ADD.B   BPADDRADDER,D0
 .POINTBP:
     MOVE.W  d0,6(a1)            ; copies the LOW word of the plane address
                                 ; in the right word in the copperlist
@@ -107,6 +113,12 @@ SetPic2:
 .cont:
     MULU    #240,D2
     ADD.L   D2,D0
+    CMPI.B  #0,BPADDRADDER
+    BGE.S   .add:
+    SUB.L   #2,D0
+    BRA.S   .POINTBP
+.add:
+    ADD.B   BPADDRADDER,D0
 
 .POINTBP:
     MOVE.W  d0,6(a1)            ; copies the LOW word of the plane address
@@ -123,7 +135,7 @@ SetPic2:
     ADDQ.W  #8,a1               ; add 8 to address, a1 now contains the address of the next
                                 ; bplpointers in the copperlist to write.
     DBRA    d1,.POINTBP          ; Redo D1 times POINTBP (D1=num of bitplanes (-1))
-    ;MOVE.W  d0,$dff088          ; let's start the copper
+
     RTS
 
 Init:
@@ -185,13 +197,11 @@ InitStatusbar:
                                 ; in the right word in the copperlist
     SWAP    d0                  ; SWAP the 2 words of d0 (ex: 3412 > 1234)
                                 ; resetting the address.
-    ADD.L   #48,d0              ; Length of one line of bitplane in bytes, here it is 384/8 = 48
+    ADD.L   #40,d0              ; Length of one line of bitplane in bytes, here it is 384/8 = 48
 
     ADDQ.W  #8,a1               ; add 8 to address, a1 now contains the address of the next
                                 ; bplpointers in the copperlist to write.
     DBRA    d1,.POINTBP          ; Redo D1 times POINTBP (D1=num of bitplanes (-1))
-
-    ;MOVE.W  #DMASET2,$96(a5)    ; DMACON - Enable Bitplane, Copper DMA
 
     RTS
 
@@ -350,18 +360,16 @@ MainLoop:
     AND.L   #$1ff00,d0
     CMP.L   WBLANKLINE,d0
     BNE.S   .loop                ; loop until VB
-    BNE.S   .checkl
-    NOP
-.checkl:
 
-    CMPI.B  #1,CHANGEPOSL
-    BNE.S   .checkr
-    BSR.W   ChangeStatusPosLeft
-.checkr:
-    CMPI.B  #1,CHANGEPOSR
-    BNE.S   .continue
-    BSR.W   ChangeStatusPosRight
-.continue:
+.checkleft:
+    CMPI.B  #1,MOVELEFT
+    BNE.S   .checkright
+    BSR.W   MoveWindowLeft
+.checkright:
+    CMPI.B  #1,MOVERIGHT
+    BNE.S   .swapbuffers
+    BSR.W   MoveWindowRight
+.swapbuffers:
     BSR.W   SwapBuffers
     BRA.W   MainLoop
 .end:
@@ -452,83 +460,63 @@ Wait:
 OldCop:            ; Here goes the address of the old system COP
     dc.l    0
 
-CHANGEPOSL:
-    DC.B    0
-CHANGEPOSR
-    DC.B    0
-
-ChangeStatusPosLeft:
-    ADDI.W  #2,BP0
-    ADDI.W  #2,BP1
-    ADDI.W  #2,BP2
-    ADDI.W  #2,BP3
-    ADDI.W  #2,BP4
-    CMPI.B  #$28,DDFST
-    BNE.S   .check4th
-    SUBI.W  #2,BP3
-    SUBI.W  #2,BP4
-.check4th
-    CMPI.B  #$20,DDFST
-    BNE.S   .setcon1
-    SUBI.W  #2,BP3
-    SUBI.W  #2,BP4
-.setcon1
-    MOVE.B  #0,CHANGEPOSL
-    RTS
-
-ChangeStatusPosRight:
-    SUBI.W  #2,BP0
-    SUBI.W  #2,BP1
-    SUBI.W  #2,BP2
-    SUBI.W  #2,BP3
-    SUBI.W  #2,BP4
-    CMPI.B  #$20,DDFST
-    BNE.S   .check4th
-    ADDI.W  #2,BP3
-    ADDI.W  #2,BP4
-.check4th
-    CMPI.B  #$18,DDFST
-    BNE.S   .setcon1
-    ADDI.W  #2,BP3
-    ADDI.W  #2,BP4
-.setcon1
-    MOVE.B  #0,CHANGEPOSR
-    RTS
-
 MoveLeft:
-    CMPI.B  #$EE,MINCON1    ; we have arrived at the normal position, i.e
-    BEQ.S   .changemod
-    CMPI.B  #$FF,MINCON1    ; we have arrived at the normal position, i.e
-    BEQ.S   .changemod
-    ADD.B   #$22,MINCON1    ; we add 1 to the bitplanes scroll
-    RTS
-.changemod:
-    CMPI.B  #$30,DDFST    ; we have arrived at the normal position, i.e
-    BEQ.S   .end
-    ADDI.B  #8,DDFST
-    ADDI.W  #2,MOD1
-    ADDI.W  #2,MOD2
-    MOVE.B  #1,CHANGEPOSL
-    MOVE.B  #$00,MINCON1    ; set con1 byte to min
-.end:
+    MOVE.B  #1,MOVELEFT
     RTS
 
 MoveRight:
-    CMPI.B  #$00,MINCON1    ; are we at zero...
-    BEQ.S   .changemod
-    CMPI.B  #$11,MINCON1    ; or one
-    BEQ.S   .changemod
-    SUB.B   #$22,MINCON1    ; we subtract 2 to the bitplanes scroll
+    MOVE.B  #1,MOVERIGHT
     RTS
+
+MoveWindowLeft:
+    CMPI.B  #$00,MINCON1    ; we have arrived at the normal position, i.e
+    BNE.S   .addstep
+    CMPI.B  #-1,BPADDRADDER    ; are we at leftmost pos
+    BLT.S   .end
+.addstep:
+    ADD.B   #$11,MINCON1    ; we add 1 to the bitplanes scroll
+    BCS.S   .add1   
+    BRA.S   .end
+.add1:
+    CMPI.B  #0,BPADDRADDER    ; are we at leftmost pos
+    BEQ.S   .setstop
+    ADD.B   #$1,MINCON1
+    BRA.S   .changemod
+.setstop:
+    MOVE.B  #$00,MINCON1
+    SUBI.B  #2,BPADDRADDER
+    BRA.S   .end
 .changemod:
-    CMPI.B  #$18,DDFST      ; are at the end
+    CMPI.B  #0,BPADDRADDER    ; are we at leftmost pos
     BEQ.S   .end
-    SUBI.B  #8,DDFST      ; change data fetch start
-    SUBI.W  #2,MOD1       ; and update modulos
-    SUBI.W  #2,MOD2
-    MOVE.B  #1,CHANGEPOSR
-    MOVE.B  #$ff,MINCON1    ; set con1 byte to max
+    SUBI.B  #2,BPADDRADDER
+.end:
+    MOVE.B #0,MOVELEFT
+    RTS
+
+MoveWindowRight:
+    CMPI.B  #0,MINCON1    ; are we at zero...
+    BNE.S   .substep
+    CMPI.B  #6,BPADDRADDER
+    BEQ.S   .end
+.substep:
+    SUB.B   #$11,MINCON1    ; we subtract 2 to the bitplanes scroll
+    BCS.S   .sub10
+    BRA.S   .end
+.sub10:
+    CMPI.B  #6,BPADDRADDER    ; are we at rightmost pos
+    BEQ.S   .setstop
+    ADD.B   #$10,MINCON1
+    BRA.S   .changemod
+.setstop:
+    MOVE.B  #$00,MINCON1
+    BRA.S   .end
+.changemod:
+    CMPI.B  #6,BPADDRADDER    ; are we at rightmost pos
+    BEQ.S   .end
+    ADDI.B  #2,BPADDRADDER
 .end
+    MOVE.B #0,MOVERIGHT
     RTS
 
 MoveWindowUp:
@@ -550,7 +538,14 @@ BLITTOTHIS_BUF:
     DC.L    0
 DISPLAY_BUF:
     DC.L    0
+BPADDRADDER:
+    DC.B    0
+MOVELEFT:
+    DC.B    0
+MOVERIGHT:
+    DC.B    0
 
+    EVEN
 
 
 WBLANKLINE:
@@ -634,7 +629,7 @@ DDFST:
     DC.W    $102        ; BplCon1
     DC.B    $00
 MINCON1:
-    DC.B    $ff
+    DC.B    $00
     DC.W    $104,0      ; BplCon2
     DC.W    $108        ; Bpl1Mod
 MOD1:
@@ -693,24 +688,22 @@ BP4:
 	DC.W	$92
 	DC.B	$00
 MIDDdfStart:
-    DC.B    $35		    ; DdfStart
+    DC.B    $38		    ; DdfStart
 	DC.W	$102		; BplCon1
 	DC.B	$00			; BplCon1
 MIDBPLCON1:
-	DC.B	$88			; BplCon1
+	DC.B	$00			; BplCon1
     DC.W    $108        ; Bpl1Mod
 MIDBPL1MOD:
-	DC.W	198;200-192
+	DC.W	160
 	DC.W	$10a		; Bpl2Mod
 MIDBPL2MOD:
-	DC.W	198;200-192 for 384
-
-    DC.W    $FFFF,$FFFE    ; END OF THE COPPERLIST
+	DC.W	160
 
     EVEN
 
 STATUSBAR:
-    INCBIN "test_statusbar_384x32_32c.iblit"
+    INCBIN "test_statusbar_320x32_32c.iblit"
 
 PIC1:
     INCBIN "test_playfield_384x384_32c.iblit"    ; here we load the figure in RAW,
